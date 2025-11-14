@@ -53,6 +53,46 @@ func main() {
 	log.Fatal(r.Run(":" + port))
 }
 
+// authMiddleware проверяет токен авторизации
+func authMiddleware() gin.HandlerFunc {
+	apiToken := os.Getenv("API_TOKEN")
+	if apiToken == "" {
+		log.Println("Warning: API_TOKEN not set, API authentication is disabled")
+		return func(c *gin.Context) {
+			c.Next()
+		}
+	}
+
+	return func(c *gin.Context) {
+		// Получаем токен из заголовков или query параметра (для EventSource)
+		token := ""
+		if authHeader := c.GetHeader("Authorization"); authHeader != "" {
+			// Поддерживаем формат "Bearer <token>"
+			if len(authHeader) > 7 && authHeader[:7] == "Bearer " {
+				token = authHeader[7:]
+			} else {
+				token = authHeader
+			}
+		} else if apiTokenHeader := c.GetHeader("X-API-Token"); apiTokenHeader != "" {
+			token = apiTokenHeader
+		} else if queryToken := c.Query("token"); queryToken != "" {
+			// Support token in query parameter for EventSource (less secure but necessary)
+			token = queryToken
+		}
+
+		if token == "" || token != apiToken {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": "Unauthorized",
+				"message": "Valid API token required. Use Authorization: Bearer <token>, X-API-Token header, or token query parameter",
+			})
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
+}
+
 func setupRoutes(r *gin.Engine) {
 	// Initialize handlers
 	handler := handlers.NewHandler()
@@ -79,25 +119,34 @@ func setupRoutes(r *gin.Engine) {
 	// API routes
 	api := r.Group("/api")
 	{
-		api.GET("/resources", handler.GetResources)
-		api.POST("/refresh", handler.RefreshResources)
-		api.POST("/refresh/progress", handler.RefreshWithProgress)
-		api.GET("/progress", handler.GetProgress)
-		api.GET("/export/pdf", handler.ExportToPDF)
+		// Public routes (no authentication required)
 		api.GET("/status", handler.GetReportStatus)
 		api.GET("/version", getVersion)
 		api.GET("/docs", getAPIDocs)
+
+		// Protected routes (authentication required)
+		protected := api.Group("")
+		protected.Use(authMiddleware())
+		{
+			protected.GET("/resources", handler.GetResources)
+			protected.POST("/refresh", handler.RefreshResources)
+			protected.POST("/refresh/progress", handler.RefreshWithProgress)
+			protected.GET("/progress", handler.GetProgress)
+			protected.GET("/export/pdf", handler.ExportToPDF)
+		}
 	}
 
 	log.Println("Routes registered:")
-	log.Println("  GET  /api/resources")
-	log.Println("  POST /api/refresh")
-	log.Println("  POST /api/refresh/progress")
-	log.Println("  GET  /api/progress")
-	log.Println("  GET  /api/export/pdf")
-	log.Println("  GET  /api/status")
-	log.Println("  GET  /api/version")
-	log.Println("  GET  /api/docs")
+	log.Println("  Public routes:")
+	log.Println("    GET  /api/status")
+	log.Println("    GET  /api/version")
+	log.Println("    GET  /api/docs")
+	log.Println("  Protected routes (require API_TOKEN):")
+	log.Println("    GET  /api/resources")
+	log.Println("    POST /api/refresh")
+	log.Println("    POST /api/refresh/progress")
+	log.Println("    GET  /api/progress")
+	log.Println("    GET  /api/export/pdf")
 
 	// Web routes
 	r.GET("/", indexHandler)
@@ -108,6 +157,7 @@ func indexHandler(c *gin.Context) {
 	c.HTML(200, "index.html", gin.H{
 		"title":   "OpenStack Resources Report",
 		"version": version.GetVersionString(),
+		"apiToken": os.Getenv("API_TOKEN"), // Pass token to frontend if set
 	})
 }
 
@@ -144,6 +194,7 @@ func getAPIDocs(c *gin.Context) {
 				"method":      "GET",
 				"path":        "/api/resources",
 				"description": "Get all OpenStack resources from cache or fetch from API",
+				"auth_required": true,
 				"parameters": []map[string]string{
 					{"name": "force", "type": "query", "description": "Force refresh from OpenStack API (optional)"},
 				},
@@ -166,6 +217,7 @@ func getAPIDocs(c *gin.Context) {
 				"method":      "POST",
 				"path":        "/api/refresh",
 				"description": "Force refresh all resources from OpenStack API",
+				"auth_required": true,
 				"parameters":  []map[string]string{},
 				"response": map[string]interface{}{
 					"type": "object",
@@ -176,9 +228,36 @@ func getAPIDocs(c *gin.Context) {
 				},
 			},
 			{
+				"method":      "POST",
+				"path":        "/api/refresh/progress",
+				"description": "Force refresh all resources from OpenStack API with progress updates via SSE",
+				"auth_required": true,
+				"parameters":  []map[string]string{},
+				"response": map[string]interface{}{
+					"type":        "text/event-stream",
+					"description": "Server-Sent Events stream with progress updates",
+				},
+			},
+			{
+				"method":      "GET",
+				"path":        "/api/progress",
+				"description": "Get current refresh progress status",
+				"auth_required": true,
+				"parameters":  []map[string]string{},
+				"response": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"status":    map[string]string{"type": "string", "description": "Current status (in_progress, completed, error)"},
+						"progress":  map[string]string{"type": "number", "description": "Progress percentage (0-100)"},
+						"message":   map[string]string{"type": "string", "description": "Current progress message"},
+					},
+				},
+			},
+			{
 				"method":      "GET",
 				"path":        "/api/export/pdf",
 				"description": "Export current report to PDF format",
+				"auth_required": true,
 				"parameters":  []map[string]string{},
 				"response": map[string]interface{}{
 					"type":        "file",
@@ -193,6 +272,7 @@ func getAPIDocs(c *gin.Context) {
 				"method":      "GET",
 				"path":        "/api/status",
 				"description": "Get current report status and metadata",
+				"auth_required": false,
 				"parameters":  []map[string]string{},
 				"response": map[string]interface{}{
 					"type": "object",
@@ -208,6 +288,7 @@ func getAPIDocs(c *gin.Context) {
 				"method":      "GET",
 				"path":        "/api/version",
 				"description": "Get application version information",
+				"auth_required": false,
 				"parameters":  []map[string]string{},
 				"response": map[string]interface{}{
 					"type": "object",
@@ -223,6 +304,7 @@ func getAPIDocs(c *gin.Context) {
 				"method":      "GET",
 				"path":        "/api/docs",
 				"description": "Get this API documentation",
+				"auth_required": false,
 				"parameters":  []map[string]string{},
 				"response": map[string]interface{}{
 					"type":        "object",
@@ -231,17 +313,27 @@ func getAPIDocs(c *gin.Context) {
 			},
 		},
 		"authentication": map[string]interface{}{
-			"type":        "environment",
-			"description": "OpenStack credentials via environment variables",
-			"variables": []string{
-				"OS_PROJECT_DOMAIN_NAME",
-				"OS_USER_DOMAIN_NAME",
-				"OS_USERNAME",
-				"OS_PASSWORD",
-				"OS_AUTH_URL",
-				"OS_IDENTITY_API_VERSION",
-				"OS_AUTH_TYPE",
-				"OS_INSECURE",
+			"api_auth": map[string]interface{}{
+				"type":        "token",
+				"description": "API token authentication for protected endpoints",
+				"required":    true,
+				"header":      "Authorization: Bearer <token> or X-API-Token: <token>",
+				"env_var":     "API_TOKEN",
+				"note":        "If API_TOKEN is not set, authentication is disabled",
+			},
+			"openstack_auth": map[string]interface{}{
+				"type":        "environment",
+				"description": "OpenStack credentials via environment variables",
+				"variables": []string{
+					"OS_PROJECT_DOMAIN_NAME",
+					"OS_USER_DOMAIN_NAME",
+					"OS_USERNAME",
+					"OS_PASSWORD",
+					"OS_AUTH_URL",
+					"OS_IDENTITY_API_VERSION",
+					"OS_AUTH_TYPE",
+					"OS_INSECURE",
+				},
 			},
 		},
 		"supported_resources": []map[string]string{

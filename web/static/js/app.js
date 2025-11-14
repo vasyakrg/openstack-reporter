@@ -14,6 +14,24 @@ class OpenStackReporter {
 		this.loadData();
 	}
 
+	// Get headers with API token if available
+	getHeaders(options = {}) {
+		const headers = {
+			...options.headers
+		};
+
+		// Add Content-Type only if not already set (for binary responses like PDF)
+		if (!headers['Content-Type'] && !options.skipContentType) {
+			headers['Content-Type'] = 'application/json';
+		}
+
+		if (window.API_TOKEN) {
+			headers['Authorization'] = `Bearer ${window.API_TOKEN}`;
+		}
+
+		return headers;
+	}
+
 	bindEvents() {
 		document.getElementById('refreshBtn').addEventListener('click', () => this.refreshData());
 		document.getElementById('exportPdfBtn').addEventListener('click', () => this.exportToPDF());
@@ -25,9 +43,14 @@ class OpenStackReporter {
 	async loadData() {
 		try {
 			this.showLoading(true);
-			const response = await fetch('/api/resources');
+			const response = await fetch('/api/resources', {
+				headers: this.getHeaders()
+			});
 
 			if (!response.ok) {
+				if (response.status === 401) {
+					throw new Error('Не авторизован. Проверьте API_TOKEN.');
+				}
 				throw new Error(`HTTP error! status: ${response.status}`);
 			}
 
@@ -47,9 +70,15 @@ class OpenStackReporter {
 	async refreshData() {
 		try {
 			// Start progress refresh
-			const response = await fetch('/api/refresh/progress', { method: 'POST' });
+			const response = await fetch('/api/refresh/progress', {
+				method: 'POST',
+				headers: this.getHeaders()
+			});
 
 			if (!response.ok) {
+				if (response.status === 401) {
+					throw new Error('Не авторизован. Проверьте API_TOKEN.');
+				}
 				throw new Error(`HTTP error! status: ${response.status}`);
 			}
 
@@ -81,7 +110,12 @@ class OpenStackReporter {
 	}
 
 	connectToProgress(sessionId) {
-		const eventSource = new EventSource(`/api/progress?session_id=${sessionId}`);
+		// EventSource doesn't support custom headers, so we pass token via query param if available
+		let url = `/api/progress?session_id=${sessionId}`;
+		if (window.API_TOKEN) {
+			url += `&token=${encodeURIComponent(window.API_TOKEN)}`;
+		}
+		const eventSource = new EventSource(url);
 
 		eventSource.onmessage = (event) => {
 			try {
@@ -320,9 +354,14 @@ class OpenStackReporter {
 
 	async exportToPDF() {
 		try {
-			const response = await fetch('/api/export/pdf');
+			const response = await fetch('/api/export/pdf', {
+				headers: this.getHeaders({ skipContentType: true })
+			});
 
 			if (!response.ok) {
+				if (response.status === 401) {
+					throw new Error('Не авторизован. Проверьте API_TOKEN.');
+				}
 				throw new Error(`HTTP error! status: ${response.status}`);
 			}
 
