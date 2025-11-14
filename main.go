@@ -117,11 +117,28 @@ func getVersion(c *gin.Context) {
 
 // getAPIDocs returns API documentation
 func getAPIDocs(c *gin.Context) {
+	// Determine scheme (http/https)
+	scheme := "http"
+	if proto := c.GetHeader("X-Forwarded-Proto"); proto != "" {
+		scheme = proto
+	} else if c.Request.TLS != nil {
+		scheme = "https"
+	}
+
+	// Get host from request
+	host := c.Request.Host
+	if host == "" {
+		host = "localhost:8080"
+	}
+
+	// Build base URL
+	baseURL := fmt.Sprintf("%s://%s/api", scheme, host)
+
 	docs := map[string]interface{}{
 		"title":       "OpenStack Reporter API",
 		"version":     version.GetVersionString(),
 		"description": "REST API for OpenStack resources reporting and management",
-		"base_url":    "http://localhost:8080/api",
+		"base_url":    baseURL,
 		"endpoints": []map[string]interface{}{
 			{
 				"method":      "GET",
