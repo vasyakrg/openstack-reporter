@@ -18,11 +18,12 @@
 - ✅ Проекты (Projects)
 - ✅ Виртуальные машины (Servers) - с информацией о Flavor и сетях
 - ✅ Диски (Volumes) - с данными о подключении, типе и размере
+- ✅ Сети (Networks) - с информацией о подсетях и CIDR
 - ✅ Балансировщики нагрузки (Load Balancers) - с IP адресами
 - ✅ Плавающие IP (Floating IPs) - с информацией о подключенных ресурсах
-- ✅ VPN соединения (IPSec Site Connections) - с Peer Address
 - ✅ Роутеры (Routers)
-- ❌ Kubernetes кластеры (в планах)
+- ✅ VPN соединения (IPSec Site Connections) - с Peer Address
+- ✅ Kubernetes кластеры (Clusters) - с информацией о нодах
 
 ## Установка
 
@@ -106,6 +107,10 @@ OS_INSECURE=true
 
 # Application Configuration
 PORT=8080
+
+# API Authentication (optional)
+# If not set, API authentication is disabled
+API_TOKEN=your-secret-api-token-here
 ```
 
 ### Параметры OpenStack
@@ -137,12 +142,65 @@ PORT=8080
 
 ### API эндпоинты
 
-- `GET /api/resources` - Получить список ресурсов
-- `POST /api/refresh` - Обновить данные из OpenStack
-- `GET /api/export/pdf` - Скачать PDF отчет
+#### Открытые эндпоинты (не требуют авторизации)
 - `GET /api/status` - Статус кэшированных данных
 - `GET /api/version` - Информация о версии приложения
 - `GET /api/docs` - API документация в JSON формате
+
+#### Защищенные эндпоинты (требуют токен авторизации)
+- `GET /api/resources` - Получить список ресурсов с поддержкой фильтрации
+- `GET /api/projects` - Получить список всех проектов
+- `POST /api/refresh` - Обновить данные из OpenStack
+- `POST /api/refresh/progress` - Обновить данные с прогрессом через SSE
+- `GET /api/progress` - Получить статус обновления данных
+- `GET /api/export/pdf` - Скачать PDF отчет
+
+#### Фильтрация ресурсов
+
+Эндпоинт `/api/resources` поддерживает фильтрацию через query параметры:
+
+- `project` - фильтр по имени проекта (можно несколько через запятую)
+  ```
+  GET /api/resources?project=infra,production
+  ```
+
+- `project_id` - фильтр по ID проекта (можно несколько через запятую)
+  ```
+  GET /api/resources?project_id=123,456
+  ```
+
+- `type` - фильтр по типу ресурса (можно несколько через запятую)
+  ```
+  GET /api/resources?type=server,volume,network
+  ```
+  Доступные типы: `server`, `volume`, `network`, `load_balancer`, `floating_ip`, `router`, `vpn_service`, `cluster`
+
+- `status` - фильтр по статусу (можно несколько через запятую)
+  ```
+  GET /api/resources?status=active,available
+  ```
+
+Фильтры можно комбинировать (работают как AND):
+```
+GET /api/resources?project=infra&type=server,volume&status=active
+```
+
+#### Авторизация
+
+Для доступа к защищенным эндпоинтам требуется токен авторизации, заданный через переменную окружения `API_TOKEN`.
+
+**Способы передачи токена:**
+- Заголовок `Authorization: Bearer <token>`
+- Заголовок `X-API-Token: <token>`
+- Query параметр `token` (для EventSource/SSE)
+
+**Пример запроса:**
+```bash
+curl -H "Authorization: Bearer your-token-here" \
+  http://localhost:8080/api/resources?project=infra&type=server
+```
+
+Если `API_TOKEN` не установлен, авторизация отключена (для обратной совместимости).
 
 ### Веб-страницы
 
@@ -213,8 +271,10 @@ openstack-reporter/
 
 - Используйте HTTPS в продакшене
 - Храните учетные данные OpenStack в переменных окружения
+- Установите `API_TOKEN` для защиты API эндпоинтов
 - Ограничьте доступ к приложению через файрвол или прокси
 - Регулярно обновляйте зависимости
+- Используйте сильные токены для `API_TOKEN` (рекомендуется минимум 32 символа)
 
 ## Устранение неполадок
 

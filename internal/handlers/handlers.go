@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -59,7 +60,167 @@ func (h *Handler) GetResources(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, report)
+	// Apply filters from query parameters
+	filteredReport := h.applyFilters(report, c)
+
+	c.JSON(http.StatusOK, filteredReport)
+}
+
+// applyFilters applies query parameter filters to the report
+func (h *Handler) applyFilters(report *models.ResourceReport, c *gin.Context) *models.ResourceReport {
+	// Create a copy of the report to avoid modifying the original
+	filtered := &models.ResourceReport{
+		GeneratedAt: report.GeneratedAt,
+		Projects:    report.Projects,
+		Resources:   make([]models.Resource, 0),
+		Summary:     models.Summary{},
+	}
+
+	// Get filter parameters
+	projectFilter := c.Query("project")
+	projectIDFilter := c.Query("project_id")
+	typeFilter := c.Query("type")
+	statusFilter := c.Query("status")
+
+	// Parse comma-separated values if provided
+	var projectNames []string
+	var projectIDs []string
+	var types []string
+	var statuses []string
+
+	if projectFilter != "" {
+		projectNames = splitCommaSeparated(projectFilter)
+	}
+	if projectIDFilter != "" {
+		projectIDs = splitCommaSeparated(projectIDFilter)
+	}
+	if typeFilter != "" {
+		types = splitCommaSeparated(typeFilter)
+	}
+	if statusFilter != "" {
+		statuses = splitCommaSeparated(statusFilter)
+	}
+
+	// Filter resources
+	for _, resource := range report.Resources {
+		// Filter by project name
+		if len(projectNames) > 0 {
+			found := false
+			for _, pn := range projectNames {
+				if resource.ProjectName == pn {
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
+		}
+
+		// Filter by project ID
+		if len(projectIDs) > 0 {
+			found := false
+			for _, pid := range projectIDs {
+				if resource.ProjectID == pid {
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
+		}
+
+		// Filter by type
+		if len(types) > 0 {
+			found := false
+			for _, t := range types {
+				if resource.Type == t {
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
+		}
+
+		// Filter by status
+		if len(statuses) > 0 {
+			found := false
+			for _, s := range statuses {
+				if resource.Status == s {
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
+		}
+
+		// Resource passed all filters
+		filtered.Resources = append(filtered.Resources, resource)
+	}
+
+	// Recalculate summary for filtered resources
+	filtered.Summary = h.calculateSummary(filtered.Resources)
+
+	return filtered
+}
+
+// splitCommaSeparated splits a comma-separated string into a slice, trimming whitespace
+func splitCommaSeparated(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+// calculateSummary calculates summary statistics for filtered resources
+func (h *Handler) calculateSummary(resources []models.Resource) models.Summary {
+	summary := models.Summary{}
+
+	// Count unique projects
+	projectSet := make(map[string]bool)
+	for _, resource := range resources {
+		if resource.ProjectID != "" {
+			projectSet[resource.ProjectID] = true
+		}
+	}
+	summary.TotalProjects = len(projectSet)
+
+	// Count by type
+	for _, resource := range resources {
+		switch resource.Type {
+		case "server":
+			summary.TotalServers++
+		case "volume":
+			summary.TotalVolumes++
+		case "load_balancer":
+			summary.TotalLoadBalancers++
+		case "floating_ip":
+			summary.TotalFloatingIPs++
+		case "vpn_service":
+			summary.TotalVPNServices++
+		case "cluster":
+			summary.TotalClusters++
+		case "router":
+			summary.TotalRouters++
+		case "network":
+			summary.TotalNetworks++
+		}
+	}
+
+	return summary
 }
 
 // RefreshResources fetches fresh data from OpenStack and saves it
@@ -259,6 +420,39 @@ func (h *Handler) GetReportStatus(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, status)
+}
+
+// GetProjects returns list of all projects
+func (h *Handler) GetProjects(c *gin.Context) {
+	// Try to load cached report first
+	report, err := h.storage.LoadReport()
+	if err != nil {
+		log.Printf("No cached report found, attempting to fetch from OpenStack: %v", err)
+
+		// If no cache, try to fetch from OpenStack
+		freshReport, fetchErr := h.fetchFromOpenStack()
+		if fetchErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Failed to load cached data and unable to fetch from OpenStack",
+				"details": fetchErr.Error(),
+			})
+			return
+		}
+
+		report = freshReport
+
+		// Save to cache
+		if saveErr := h.storage.SaveReport(report); saveErr != nil {
+			log.Printf("Warning: Failed to save report to cache: %v", saveErr)
+		}
+	}
+
+	// Return projects list
+	c.JSON(http.StatusOK, gin.H{
+		"projects": report.Projects,
+		"total":    len(report.Projects),
+		"generated_at": report.GeneratedAt,
+	})
 }
 
 // fetchFromOpenStack connects to OpenStack and fetches all resources

@@ -22,6 +22,7 @@ services:
       - OS_REGION_NAME=${OS_REGION_NAME}
       - OS_PROJECT_NAME=${OS_PROJECT_NAME}
       - PORT=8080
+      - API_TOKEN=${API_TOKEN}
     volumes:
       - ./data:/app/data
     restart: unless-stopped

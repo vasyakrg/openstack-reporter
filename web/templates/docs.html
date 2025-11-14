@@ -72,6 +72,7 @@
                                 <a class="nav-link active" href="#overview">Overview</a>
                                 <a class="nav-link" href="#authentication">Authentication</a>
                                 <a class="nav-link" href="#endpoints">Endpoints</a>
+                                <a class="nav-link" href="#filtering">Filtering</a>
                                 <a class="nav-link" href="#resources">Resources</a>
                                 <a class="nav-link" href="#examples">Examples</a>
                             </nav>
@@ -113,6 +114,19 @@
                             </h4>
                         </div>
                         <div class="card-body">
+                            <h5>API Token Authentication</h5>
+                            <p>Most endpoints require API token authentication. Set the <code>API_TOKEN</code> environment variable to enable authentication.</p>
+                            <div class="alert alert-warning">
+                                <i class="fas fa-exclamation-triangle me-2"></i>
+                                <strong>Note:</strong> If <code>API_TOKEN</code> is not set, authentication is disabled for backward compatibility.
+                            </div>
+                            <h6 class="mt-3">Ways to pass the token:</h6>
+                            <ul>
+                                <li><strong>Authorization header:</strong> <code>Authorization: Bearer &lt;token&gt;</code></li>
+                                <li><strong>X-API-Token header:</strong> <code>X-API-Token: &lt;token&gt;</code></li>
+                                <li><strong>Query parameter:</strong> <code>?token=&lt;token&gt;</code> (for EventSource/SSE)</li>
+                            </ul>
+                            <h6 class="mt-3">OpenStack Credentials</h6>
                             <p>The API uses OpenStack credentials configured via environment variables:</p>
                             <div class="json-viewer">
 export OS_PROJECT_DOMAIN_NAME=vhc-pc
@@ -122,7 +136,25 @@ export OS_PASSWORD=your_password
 export OS_AUTH_URL=https://eu3-cloud.virtuozzo.com:5000/v3
 export OS_IDENTITY_API_VERSION=3
 export OS_AUTH_TYPE=password
-export OS_INSECURE=true</div>
+export OS_INSECURE=true
+
+# API Authentication (optional)
+export API_TOKEN=your-secret-api-token-here</div>
+                            <h6 class="mt-3">Public Endpoints (no authentication required):</h6>
+                            <ul>
+                                <li><code>GET /api/status</code></li>
+                                <li><code>GET /api/version</code></li>
+                                <li><code>GET /api/docs</code></li>
+                            </ul>
+                            <h6 class="mt-3">Protected Endpoints (require API_TOKEN):</h6>
+                            <ul>
+                                <li><code>GET /api/resources</code></li>
+                                <li><code>GET /api/projects</code></li>
+                                <li><code>POST /api/refresh</code></li>
+                                <li><code>POST /api/refresh/progress</code></li>
+                                <li><code>GET /api/progress</code></li>
+                                <li><code>GET /api/export/pdf</code></li>
+                            </ul>
                         </div>
                     </div>
                 </section>
@@ -142,29 +174,61 @@ export OS_INSECURE=true</div>
                                 <div class="card-header d-flex align-items-center">
                                     <span class="badge method-badge method-get me-3">GET</span>
                                     <h6 class="mb-0">/api/resources</h6>
+                                    <span class="badge bg-warning text-dark ms-auto">Requires Auth</span>
                                 </div>
                                 <div class="card-body">
-                                    <p>Get all OpenStack resources from cache or fetch from API</p>
-                                    <h6>Parameters:</h6>
+                                    <p>Get all OpenStack resources from cache or fetch from API. Supports filtering via query parameters.</p>
+                                    <h6>Query Parameters:</h6>
                                     <ul>
-                                        <li><code>force</code> (query, optional) - Force refresh from OpenStack API</li>
+                                        <li><code>force</code> (optional) - Force refresh from OpenStack API</li>
+                                        <li><code>project</code> (optional) - Filter by project name(s), comma-separated</li>
+                                        <li><code>project_id</code> (optional) - Filter by project ID(s), comma-separated</li>
+                                        <li><code>type</code> (optional) - Filter by resource type(s), comma-separated</li>
+                                        <li><code>status</code> (optional) - Filter by status, comma-separated</li>
                                     </ul>
                                     <h6>Response Example:</h6>
                                     <div class="json-viewer">
 {
     "projects": [...],
-    "servers": [...],
-    "volumes": [...],
-    "load_balancers": [...],
-    "floating_ips": [...],
-    "routers": [...],
-    "vpn_services": [...],
-    "clusters": [...],
+    "resources": [...],
     "summary": {
-        "total_servers": 5,
-        "total_volumes": 3,
-        "total_load_balancers": 1
+        "total_projects": 5,
+        "total_servers": 10,
+        "total_volumes": 5,
+        "total_networks": 3,
+        "total_load_balancers": 2,
+        "total_floating_ips": 4,
+        "total_routers": 2,
+        "total_vpn_services": 1,
+        "total_clusters": 1
     },
+    "generated_at": "2025-01-15T10:30:00Z"
+}</div>
+                                </div>
+                            </div>
+
+                            <!-- GET /api/projects -->
+                            <div class="card endpoint-card">
+                                <div class="card-header d-flex align-items-center">
+                                    <span class="badge method-badge method-get me-3">GET</span>
+                                    <h6 class="mb-0">/api/projects</h6>
+                                    <span class="badge bg-warning text-dark ms-auto">Requires Auth</span>
+                                </div>
+                                <div class="card-body">
+                                    <p>Get list of all OpenStack projects</p>
+                                    <h6>Response Example:</h6>
+                                    <div class="json-viewer">
+{
+    "projects": [
+        {
+            "id": "project-id-1",
+            "name": "project-name-1",
+            "description": "Project description",
+            "domain_id": "domain-id",
+            "enabled": true
+        }
+    ],
+    "total": 5,
     "generated_at": "2025-01-15T10:30:00Z"
 }</div>
                                 </div>
@@ -175,6 +239,7 @@ export OS_INSECURE=true</div>
                                 <div class="card-header d-flex align-items-center">
                                     <span class="badge method-badge method-post me-3">POST</span>
                                     <h6 class="mb-0">/api/refresh</h6>
+                                    <span class="badge bg-warning text-dark ms-auto">Requires Auth</span>
                                 </div>
                                 <div class="card-body">
                                     <p>Force refresh all resources from OpenStack API</p>
@@ -182,8 +247,53 @@ export OS_INSECURE=true</div>
                                     <div class="json-viewer">
 {
     "message": "Resources refreshed successfully",
-    "data": { /* Updated resource data */ }
+    "generated_at": "2025-01-15T10:30:00Z",
+    "total_resources": 25
 }</div>
+                                </div>
+                            </div>
+
+                            <!-- POST /api/refresh/progress -->
+                            <div class="card endpoint-card">
+                                <div class="card-header d-flex align-items-center">
+                                    <span class="badge method-badge method-post me-3">POST</span>
+                                    <h6 class="mb-0">/api/refresh/progress</h6>
+                                    <span class="badge bg-warning text-dark ms-auto">Requires Auth</span>
+                                </div>
+                                <div class="card-body">
+                                    <p>Force refresh all resources from OpenStack API with progress updates via Server-Sent Events (SSE)</p>
+                                    <h6>Response:</h6>
+                                    <ul>
+                                        <li><strong>Content-Type:</strong> application/json</li>
+                                        <li>Returns <code>session_id</code> to use with <code>/api/progress</code> endpoint</li>
+                                    </ul>
+                                    <h6>Response Example:</h6>
+                                    <div class="json-viewer">
+{
+    "message": "Refresh started",
+    "session_id": "session_1234567890"
+}</div>
+                                </div>
+                            </div>
+
+                            <!-- GET /api/progress -->
+                            <div class="card endpoint-card">
+                                <div class="card-header d-flex align-items-center">
+                                    <span class="badge method-badge method-get me-3">GET</span>
+                                    <h6 class="mb-0">/api/progress</h6>
+                                    <span class="badge bg-warning text-dark ms-auto">Requires Auth</span>
+                                </div>
+                                <div class="card-body">
+                                    <p>Get current refresh progress status via Server-Sent Events (SSE)</p>
+                                    <h6>Query Parameters:</h6>
+                                    <ul>
+                                        <li><code>session_id</code> (required) - Session ID from <code>/api/refresh/progress</code></li>
+                                    </ul>
+                                    <h6>Response:</h6>
+                                    <ul>
+                                        <li><strong>Content-Type:</strong> text/event-stream</li>
+                                        <li>Streams progress updates as JSON events</li>
+                                    </ul>
                                 </div>
                             </div>
 
@@ -192,6 +302,7 @@ export OS_INSECURE=true</div>
                                 <div class="card-header d-flex align-items-center">
                                     <span class="badge method-badge method-get me-3">GET</span>
                                     <h6 class="mb-0">/api/export/pdf</h6>
+                                    <span class="badge bg-warning text-dark ms-auto">Requires Auth</span>
                                 </div>
                                 <div class="card-body">
                                     <p>Export current report to PDF format</p>
@@ -208,16 +319,17 @@ export OS_INSECURE=true</div>
                                 <div class="card-header d-flex align-items-center">
                                     <span class="badge method-badge method-get me-3">GET</span>
                                     <h6 class="mb-0">/api/status</h6>
+                                    <span class="badge bg-success ms-auto">Public</span>
                                 </div>
                                 <div class="card-body">
                                     <p>Get current report status and metadata</p>
                                     <h6>Response Example:</h6>
                                     <div class="json-viewer">
 {
-    "exists": true,
-    "last_update": "2025-01-15T10:30:00Z",
-    "age_minutes": 15,
-    "file_size": 1024
+    "report_exists": true,
+    "last_check": "2025-01-15T10:30:00Z",
+    "report_age_hours": 0.25,
+    "report_age_human": "15 минут"
 }</div>
                                 </div>
                             </div>
@@ -227,6 +339,7 @@ export OS_INSECURE=true</div>
                                 <div class="card-header d-flex align-items-center">
                                     <span class="badge method-badge method-get me-3">GET</span>
                                     <h6 class="mb-0">/api/version</h6>
+                                    <span class="badge bg-success ms-auto">Public</span>
                                 </div>
                                 <div class="card-body">
                                     <p>Get application version information</p>
@@ -246,6 +359,7 @@ export OS_INSECURE=true</div>
                                 <div class="card-header d-flex align-items-center">
                                     <span class="badge method-badge method-get me-3">GET</span>
                                     <h6 class="mb-0">/api/docs</h6>
+                                    <span class="badge bg-success ms-auto">Public</span>
                                 </div>
                                 <div class="card-body">
                                     <p>Get this API documentation in JSON format</p>
@@ -287,6 +401,13 @@ export OS_INSECURE=true</div>
                                             <div>
                                                 <strong>Volumes</strong>
                                                 <small class="text-muted d-block">Block storage volumes (Cinder)</small>
+                                            </div>
+                                        </li>
+                                        <li class="list-group-item d-flex align-items-center">
+                                            <i class="fas fa-network-wired me-3 text-secondary"></i>
+                                            <div>
+                                                <strong>Networks</strong>
+                                                <small class="text-muted d-block">Network resources with subnets (Neutron)</small>
                                             </div>
                                         </li>
                                         <li class="list-group-item d-flex align-items-center">
@@ -335,6 +456,54 @@ export OS_INSECURE=true</div>
                     </div>
                 </section>
 
+                <!-- Filtering Section -->
+                <section id="filtering" class="mb-5">
+                    <div class="card">
+                        <div class="card-header">
+                            <h4 class="mb-0">
+                                <i class="fas fa-filter me-2"></i>
+                                Resource Filtering
+                            </h4>
+                        </div>
+                        <div class="card-body">
+                            <p>The <code>GET /api/resources</code> endpoint supports filtering via query parameters. Filters can be combined and work as AND conditions.</p>
+
+                            <h5>Available Filters</h5>
+
+                            <h6 class="mt-3">Project Filter</h6>
+                            <p>Filter by project name or ID:</p>
+                            <div class="json-viewer">
+# By project name
+GET /api/resources?project=infra,production
+
+# By project ID
+GET /api/resources?project_id=123,456</div>
+
+                            <h6 class="mt-3">Type Filter</h6>
+                            <p>Filter by resource type (comma-separated):</p>
+                            <div class="json-viewer">
+GET /api/resources?type=server,volume,network</div>
+                            <p class="text-muted small">Available types: <code>server</code>, <code>volume</code>, <code>network</code>, <code>load_balancer</code>, <code>floating_ip</code>, <code>router</code>, <code>vpn_service</code>, <code>cluster</code></p>
+
+                            <h6 class="mt-3">Status Filter</h6>
+                            <p>Filter by status (comma-separated):</p>
+                            <div class="json-viewer">
+GET /api/resources?status=active,available</div>
+
+                            <h6 class="mt-3">Combined Filters</h6>
+                            <p>Combine multiple filters:</p>
+                            <div class="json-viewer">
+# Servers and volumes from infra project with active status
+GET /api/resources?project=infra&type=server,volume&status=active</div>
+
+                            <div class="alert alert-info mt-3">
+                                <i class="fas fa-info-circle me-2"></i>
+                                <strong>Note:</strong> The summary is automatically recalculated for filtered results.
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
                 <!-- Examples Section -->
                 <section id="examples" class="mb-5">
                     <div class="card">
@@ -347,20 +516,42 @@ export OS_INSECURE=true</div>
                         <div class="card-body">
                             <h6>cURL Examples:</h6>
 
-                            <h6 class="mt-4">Get all resources:</h6>
-                            <div class="json-viewer">curl -X GET "http://localhost:8080/api/resources"</div>
+                            <h6 class="mt-4">Get all resources (with authentication):</h6>
+                            <div class="json-viewer">curl -H "Authorization: Bearer YOUR_TOKEN" \
+  "http://localhost:8080/api/resources"</div>
 
-                            <h6 class="mt-4">Force refresh from OpenStack:</h6>
-                            <div class="json-viewer">curl -X GET "http://localhost:8080/api/resources?force=true"</div>
+                            <h6 class="mt-4">Get filtered resources:</h6>
+                            <div class="json-viewer">curl -H "Authorization: Bearer YOUR_TOKEN" \
+  "http://localhost:8080/api/resources?project=infra&type=server,volume"</div>
+
+                            <h6 class="mt-4">Get list of projects:</h6>
+                            <div class="json-viewer">curl -H "Authorization: Bearer YOUR_TOKEN" \
+  "http://localhost:8080/api/projects"</div>
 
                             <h6 class="mt-4">Refresh resources:</h6>
-                            <div class="json-viewer">curl -X POST "http://localhost:8080/api/refresh"</div>
+                            <div class="json-viewer">curl -X POST \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  "http://localhost:8080/api/refresh"</div>
+
+                            <h6 class="mt-4">Refresh with progress (SSE):</h6>
+                            <div class="json-viewer"># Start refresh
+curl -X POST \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  "http://localhost:8080/api/refresh/progress"
+
+# Get progress (use session_id from above)
+curl -H "Authorization: Bearer YOUR_TOKEN" \
+  "http://localhost:8080/api/progress?session_id=session_1234567890"</div>
 
                             <h6 class="mt-4">Download PDF report:</h6>
-                            <div class="json-viewer">curl -X GET "http://localhost:8080/api/export/pdf" -o report.pdf</div>
+                            <div class="json-viewer">curl -H "Authorization: Bearer YOUR_TOKEN" \
+  "http://localhost:8080/api/export/pdf" -o report.pdf</div>
 
-                            <h6 class="mt-4">Check API status:</h6>
-                            <div class="json-viewer">curl -X GET "http://localhost:8080/api/status"</div>
+                            <h6 class="mt-4">Check API status (public endpoint):</h6>
+                            <div class="json-viewer">curl "http://localhost:8080/api/status"</div>
+
+                            <h6 class="mt-4">Get version (public endpoint):</h6>
+                            <div class="json-viewer">curl "http://localhost:8080/api/version"</div>
                         </div>
                     </div>
                 </section>

@@ -129,6 +129,7 @@ func setupRoutes(r *gin.Engine) {
 		protected.Use(authMiddleware())
 		{
 			protected.GET("/resources", handler.GetResources)
+			protected.GET("/projects", handler.GetProjects)
 			protected.POST("/refresh", handler.RefreshResources)
 			protected.POST("/refresh/progress", handler.RefreshWithProgress)
 			protected.GET("/progress", handler.GetProgress)
@@ -143,6 +144,7 @@ func setupRoutes(r *gin.Engine) {
 	log.Println("    GET  /api/docs")
 	log.Println("  Protected routes (require API_TOKEN):")
 	log.Println("    GET  /api/resources")
+	log.Println("    GET  /api/projects")
 	log.Println("    POST /api/refresh")
 	log.Println("    POST /api/refresh/progress")
 	log.Println("    GET  /api/progress")
@@ -197,20 +199,20 @@ func getAPIDocs(c *gin.Context) {
 				"auth_required": true,
 				"parameters": []map[string]string{
 					{"name": "force", "type": "query", "description": "Force refresh from OpenStack API (optional)"},
+					{"name": "project", "type": "query", "description": "Filter by project name(s), comma-separated (e.g., 'project1,project2')"},
+					{"name": "project_id", "type": "query", "description": "Filter by project ID(s), comma-separated (e.g., 'id1,id2')"},
+					{"name": "type", "type": "query", "description": "Filter by resource type(s), comma-separated (e.g., 'server,volume,network')"},
+					{"name": "status", "type": "query", "description": "Filter by status, comma-separated (e.g., 'active,available')"},
 				},
 				"response": map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
 						"projects":        map[string]string{"type": "array", "description": "List of projects"},
-						"servers":         map[string]string{"type": "array", "description": "List of virtual machines"},
-						"volumes":         map[string]string{"type": "array", "description": "List of storage volumes"},
-						"load_balancers":  map[string]string{"type": "array", "description": "List of load balancers"},
-						"floating_ips":    map[string]string{"type": "array", "description": "List of floating IP addresses"},
-						"routers":         map[string]string{"type": "array", "description": "List of network routers"},
-						"vpn_services":    map[string]string{"type": "array", "description": "List of VPN IPSec site connections"},
-						"summary":         map[string]string{"type": "object", "description": "Resource counts summary"},
-						"generated_at":    map[string]string{"type": "string", "description": "Report generation timestamp"},
+						"resources":        map[string]string{"type": "array", "description": "List of all resources (servers, volumes, networks, etc.)"},
+						"summary":          map[string]string{"type": "object", "description": "Resource counts summary"},
+						"generated_at":     map[string]string{"type": "string", "description": "Report generation timestamp"},
 					},
+					"note": "Resources array contains all resource types. Use 'type' filter to get specific resource types. Summary is automatically recalculated for filtered results.",
 				},
 			},
 			{
@@ -311,6 +313,21 @@ func getAPIDocs(c *gin.Context) {
 					"description": "API documentation in JSON format",
 				},
 			},
+			{
+				"method":      "GET",
+				"path":        "/api/projects",
+				"description": "Get list of all OpenStack projects",
+				"auth_required": true,
+				"parameters":  []map[string]string{},
+				"response": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"projects":     map[string]string{"type": "array", "description": "List of projects"},
+						"total":        map[string]string{"type": "number", "description": "Total number of projects"},
+						"generated_at": map[string]string{"type": "string", "description": "Report generation timestamp"},
+					},
+				},
+			},
 		},
 		"authentication": map[string]interface{}{
 			"api_auth": map[string]interface{}{
@@ -340,10 +357,26 @@ func getAPIDocs(c *gin.Context) {
 			{"name": "Projects", "description": "OpenStack projects/tenants"},
 			{"name": "Servers", "description": "Virtual machines with Flavor and network info (Nova)"},
 			{"name": "Volumes", "description": "Block storage volumes with attachment details (Cinder)"},
+			{"name": "Networks", "description": "Network resources with subnet information (Neutron)"},
 			{"name": "Load Balancers", "description": "Load balancing services with IP addresses (Octavia)"},
 			{"name": "Floating IPs", "description": "Public IP addresses with attachment info (Neutron)"},
 			{"name": "Routers", "description": "Network routers (Neutron)"},
 			{"name": "VPN Connections", "description": "IPSec site-to-site connections with peer info (Neutron VPNaaS)"},
+			{"name": "Kubernetes Clusters", "description": "Kubernetes clusters managed by Magnum"},
+		},
+		"filtering": map[string]interface{}{
+			"description": "The /api/resources endpoint supports filtering via query parameters",
+			"filters": []map[string]string{
+				{"name": "project", "description": "Filter by project name(s), comma-separated (e.g., 'project1,project2')"},
+				{"name": "project_id", "description": "Filter by project ID(s), comma-separated (e.g., 'id1,id2')"},
+				{"name": "type", "description": "Filter by resource type(s), comma-separated. Available types: server, volume, network, load_balancer, floating_ip, router, vpn_service, cluster"},
+				{"name": "status", "description": "Filter by status, comma-separated (e.g., 'active,available')"},
+			},
+			"examples": []string{
+				"/api/resources?project=infra&type=server,volume",
+				"/api/resources?type=network&status=active",
+				"/api/resources?project_id=123,456&type=server",
+			},
 		},
 	}
 
