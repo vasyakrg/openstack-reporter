@@ -26,16 +26,27 @@ services:
     volumes:
       - ./data:/app/data
     restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      # Router for /api/* paths (without auth middleware)
+      - "traefik.http.routers.openstack-reporter-api.rule=Host(`reporter.ggsel.com`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.openstack-reporter-api.tls=true"
+      - "traefik.http.routers.openstack-reporter-api.tls.certresolver=letsEncrypt"
+      - "traefik.http.routers.openstack-reporter-api.entrypoints=https"
+      - "traefik.http.routers.openstack-reporter-api.service=openstack-reporter"
+      - "traefik.http.routers.openstack-reporter-api.priority=10"
+      # Router for all other paths (with auth middleware)
+      - "traefik.http.routers.openstack-reporter.rule=Host(`reporter.ggsel.com`)"
+      - "traefik.http.routers.openstack-reporter.tls=true"
+      - "traefik.http.routers.openstack-reporter.tls.certresolver=letsEncrypt"
+      - "traefik.http.routers.openstack-reporter.entrypoints=https"
+      - "traefik.http.routers.openstack-reporter.service=openstack-reporter"
+      - "traefik.http.routers.openstack-reporter.middlewares=tinyauth-ggsel"
+      # Service configuration
+      - "traefik.http.services.openstack-reporter.loadbalancer.server.port=8080"
+      - "traefik.docker.network=webproxy"
     healthcheck:
-      test:
-        [
-          "CMD",
-          "wget",
-          "--no-verbose",
-          "--tries=1",
-          "--spider",
-          "http://localhost:8080/api/status",
-        ]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/api/status"]
       interval: 30s
       timeout: 10s
       retries: 3

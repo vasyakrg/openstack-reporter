@@ -3,8 +3,10 @@ package main
 import (
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -53,6 +55,39 @@ func main() {
 	log.Fatal(r.Run(":" + port))
 }
 
+// isInternalRequest проверяет, является ли запрос внутренним
+func isInternalRequest(clientIP string) bool {
+	if clientIP == "" {
+		return false
+	}
+
+	// Проверяем localhost
+	if clientIP == "127.0.0.1" || clientIP == "::1" || clientIP == "localhost" {
+		return true
+	}
+
+	// Парсим IP адрес
+	ip := net.ParseIP(clientIP)
+	if ip == nil {
+		return false
+	}
+
+	// Проверяем приватные сети
+	privateNetworks := []*net.IPNet{
+		{IP: net.IPv4(10, 0, 0, 0), Mask: net.CIDRMask(8, 32)},     // 10.0.0.0/8
+		{IP: net.IPv4(172, 16, 0, 0), Mask: net.CIDRMask(12, 32)},  // 172.16.0.0/12
+		{IP: net.IPv4(192, 168, 0, 0), Mask: net.CIDRMask(16, 32)}, // 192.168.0.0/16
+	}
+
+	for _, network := range privateNetworks {
+		if network.Contains(ip) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // authMiddleware проверяет токен авторизации
 func authMiddleware() gin.HandlerFunc {
 	apiToken := os.Getenv("API_TOKEN")
@@ -64,7 +99,53 @@ func authMiddleware() gin.HandlerFunc {
 	}
 
 	return func(c *gin.Context) {
-		// Получаем токен из заголовков или query параметра (для EventSource)
+		// Получаем IP адрес клиента (Gin учитывает X-Forwarded-For и X-Real-IP благодаря SetTrustedProxies)
+		clientIP := c.ClientIP()
+
+		// Проверяем, является ли запрос внутренним по IP адресу
+		if isInternalRequest(clientIP) {
+			log.Printf("DEBUG: Internal request from %s, skipping auth check", clientIP)
+			c.Next()
+			return
+		}
+
+		// Проверяем заголовки для случаев, когда Traefik проксирует запрос
+		// Если запрос идет от браузера через Traefik, реальный IP будет в X-Forwarded-For
+		forwardedFor := c.GetHeader("X-Forwarded-For")
+		if forwardedFor != "" {
+			// X-Forwarded-For может содержать несколько IP через запятую, берем первый
+			ips := strings.Split(forwardedFor, ",")
+			if len(ips) > 0 {
+				realIP := strings.TrimSpace(ips[0])
+				if isInternalRequest(realIP) {
+					log.Printf("DEBUG: Internal request from %s (via X-Forwarded-For: %s), skipping auth check", clientIP, realIP)
+					c.Next()
+					return
+				}
+			}
+		}
+
+		// Проверяем, является ли запрос от веб-интерфейса (по Referer или Origin)
+		// Если запрос идет с того же домена, это внутренний запрос от веб-интерфейса
+		referer := c.GetHeader("Referer")
+		origin := c.GetHeader("Origin")
+		host := c.GetHeader("Host")
+
+		if host != "" {
+			// Если Referer или Origin содержат тот же Host, это запрос от веб-интерфейса
+			if referer != "" && strings.Contains(referer, host) {
+				log.Printf("DEBUG: Request from web interface (Referer: %s, Host: %s), skipping auth check", referer, host)
+				c.Next()
+				return
+			}
+			if origin != "" && strings.Contains(origin, host) {
+				log.Printf("DEBUG: Request from web interface (Origin: %s, Host: %s), skipping auth check", origin, host)
+				c.Next()
+				return
+			}
+		}
+
+		// Для внешних запросов проверяем токен
 		token := ""
 		if authHeader := c.GetHeader("Authorization"); authHeader != "" {
 			// Поддерживаем формат "Bearer <token>"
@@ -81,6 +162,7 @@ func authMiddleware() gin.HandlerFunc {
 		}
 
 		if token == "" || token != apiToken {
+			log.Printf("DEBUG: External request from %s without valid token", clientIP)
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"error": "Unauthorized",
 				"message": "Valid API token required. Use Authorization: Bearer <token>, X-API-Token header, or token query parameter",
@@ -89,6 +171,7 @@ func authMiddleware() gin.HandlerFunc {
 			return
 		}
 
+		log.Printf("DEBUG: External request from %s with valid token", clientIP)
 		c.Next()
 	}
 }
