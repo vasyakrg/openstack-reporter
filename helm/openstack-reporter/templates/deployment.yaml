@@ -37,13 +37,13 @@ spec:
               protocol: TCP
           livenessProbe:
             httpGet:
-              path: /api/health
+              path: /api/status
               port: http
             initialDelaySeconds: 30
             periodSeconds: 10
           readinessProbe:
             httpGet:
-              path: /api/health
+              path: /api/status
               port: http
             initialDelaySeconds: 5
             periodSeconds: 5
